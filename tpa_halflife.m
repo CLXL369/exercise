@@ -1,5 +1,5 @@
 function T_half = tpa_halflife(r, V, Q_a, Z_a, Z_c, mu_c2, hb2_2mu, e2, hbar_c, hbar_MeVs, L)
-% TPPA_HALFLIFE  Alpha-decay half-life via the Two-Potential Approach (TPA).
+% TPA_HALFLIFE  Alpha-decay half-life via the Two-Potential Approach (TPA).
 %
 %   T_half = tpa_halflife(r, V, Q_a, Z_a, Z_c, mu_c2, hb2_2mu, e2, hbar_c, hbar_MeVs, L)
 %

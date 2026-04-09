@@ -11,9 +11,21 @@
 %   V_alpha-core(r) = V_N(r) + V_C(r)                                 (eq. 2)
 %   V_N via double-folding with M3Y interaction (lambda renorm.)       (eq. 3,5)
 %   V_C via double-folding with Coulomb interaction                    (eq. 4,6)
-%   T_{1/2} = hbar*ln2/Gamma,  Gamma = (4hbar^2 k~^2/mu/k)|phi chi|^2 (eq. 7)
-%   lambda found from WKB Wildermuth condition G = 2N+L = 16           (eq. 18)
+%   T_{1/2} = hbar*ln2/Gamma,  Gamma=(4hbar^2 k~^2/mu/k)|phi chi|^2  (eq. 7)
+%   lambda found by Schrodinger eigenvalue condition (eq. 18 exactly)
 %   P_alpha = 1                                                        (sect. 2)
+%
+% Computation flow (per system, following the paper's logic):
+%   Step 1: Build double-folding potentials VN0 and VC using Q_alpha_centre.
+%           (VN0 = V_N/lambda; VC = Coulomb folded potential)
+%   Step 2: Find lambda by requiring that the Schrodinger equation for the
+%           alpha+core system gives an eigenvalue exactly equal to Q_alpha_centre
+%           with N_target = (G-L)/2 = 8 nodes (Wildermuth condition, eq. 18).
+%           This fixes the potential depth for the system.
+%   Step 3: Use the *same* fixed V = lambda*VN0 + VC for all three Q_alpha values
+%           [lower, centre, upper].  Only Q_alpha changes in the TPA formula (eq. 7);
+%           the potential does not change.
+%   Step 4: T_{1/2} = hbar*ln2 / Gamma_alpha  for each Q_alpha.
 %
 % Physical units: fm (lengths), MeV (energies), s (time)
 %
@@ -33,31 +45,33 @@ hbar_MeVs = 6.58212e-22;   % MeV.s     (hbar)
 %% Decay systems
 %% =========================================================================
 % System 1: 108Xe -> 104Te + alpha
-sys(1).label   = '108Xe -> 104Te';
-sys(1).A_a = 4;  sys(1).Z_a = 2;    % alpha particle
-sys(1).A_c = 104; sys(1).Z_c = 52;  % daughter core: 104Te
-sys(1).L   = 0;                      % orbital angular momentum (g.s. -> g.s.)
-sys(1).Q_range = [4.4, 4.6, 4.8];   % Q_alpha (MeV): [lower, centre, upper]
+sys(1).label  = '108Xe -> 104Te';
+sys(1).A_a    = 4;   sys(1).Z_a = 2;     % alpha particle
+sys(1).A_c    = 104; sys(1).Z_c = 52;    % daughter core: 104Te
+sys(1).L      = 0;                        % orbital angular momentum (g.s.)
+sys(1).Q_c    = 4.6;                      % central Q_alpha (MeV), Bai&Ren eq.(1)
+sys(1).Q_range = [4.4, 4.6, 4.8];        % [lower, centre, upper]  Q_alpha (MeV)
 
 % System 2: 104Te -> 100Sn + alpha
-sys(2).label   = '104Te -> 100Sn';
-sys(2).A_a = 4;  sys(2).Z_a = 2;
-sys(2).A_c = 100; sys(2).Z_c = 50;  % daughter core: 100Sn
-sys(2).L   = 0;
+sys(2).label  = '104Te -> 100Sn';
+sys(2).A_a    = 4;   sys(2).Z_a = 2;
+sys(2).A_c    = 100; sys(2).Z_c = 50;    % daughter core: 100Sn
+sys(2).L      = 0;
+sys(2).Q_c    = 5.1;                      % central Q_alpha (MeV)
 sys(2).Q_range = [4.9, 5.1, 5.3];
 
 %% =========================================================================
 %% Radial grid
 %% =========================================================================
-dr = 0.04;     % fm  (step size; k_max*dr << 1 verified for k_max~8 fm^-1)
-Nr = 1200;     % grid points (r_max = 48 fm; well beyond Coulomb turning point)
-r  = (1:Nr)' * dr;   % r(1)=0.04 fm, r(Nr)=48 fm
+dr = 0.04;     % fm  (step size)
+Nr = 1200;     % grid points  (r_max = 48 fm)
+r  = (1:Nr)' * dr;   % r(1) = 0.04 fm, r(Nr) = 48 fm
 
 %% =========================================================================
 %% Wildermuth global quantum number (eq. 18)
 %% =========================================================================
-% For 104Te and 108Xe: four valence nucleons occupy 0g_{7/2} (n_i=0, l_i=4)
-% G = sum(2*n_i + l_i) = 4*4 = 16  =>  N = (G-L)/2 = 8 for L=0
+% For 104Te and 108Xe: four valence nucleons in 0g_{7/2} (n_i=0, l_i=4)
+% G = sum(2*n_i + l_i) = 4*4 = 16  =>  N_target = (G-L)/2 = 8 for L=0
 G_wild = 16;
 
 %% =========================================================================
@@ -66,13 +80,14 @@ G_wild = 16;
 fprintf('\n');
 fprintf('======================================================\n');
 fprintf('  Bai & Ren (2018) Table 1 Reproduction\n');
-fprintf('  DDCM + TPA,  P_alpha=1,  G=16,  eq.(16) densities\n');
+fprintf('  DDCM + TPA,  P_alpha=1,  G=16\n');
+fprintf('  lambda from Schrodinger eigenvalue condition\n');
 fprintf('======================================================\n\n');
 fprintf('%-22s  %8s  %8s  %14s\n', 'System', 'Q_a(MeV)', 'lambda', 'T_half(ns)');
 fprintf('%s\n', repmat('-', 58, 1));
 
 %% =========================================================================
-%% Main loop
+%% Main loop over decay systems
 %% =========================================================================
 for is = 1:2
     s = sys(is);
@@ -89,31 +104,37 @@ for is = 1:2
     fprintf('\n  [%s]  mu*c^2=%.2f MeV,  c=%.3f fm,  a=%.2f fm,  rho0=%.5f fm^-3\n', ...
             s.label, mu_c2, c_f, a_f, rho0);
 
+    %% Step 1: Double-folding potentials (computed ONCE with central Q_alpha)
+    % Using the central Q value for the M3Y exchange term J_EX = 276*(0.005*Q/A - 1)
+    % ensures the potential is fixed for all three Q calculations below.
+    [VN0, VC] = double_folding(r, s.A_a, s.Z_a, s.A_c, s.Z_c, ...
+                               rho0, c_f, a_f, s.Q_c, e2);
+
+    %% Step 2: Find lambda from Schrodinger eigenvalue condition (ONCE, central Q)
+    % Requires E_{N_target}(lambda) = Q_c  exactly.
+    % N_target = (G-L)/2 = 8 nodes  (Wildermuth condition, eq. 18)
+    lam = find_lambda(r, VN0, VC, s.Q_c, G_wild, s.L, hb2_2mu);
+
+    %% Full effective potential (fixed for this system)
+    V = lam * VN0 + VC;
+    if s.L > 0
+        V = V + hb2_2mu * s.L*(s.L+1) ./ r.^2;
+    end
+
+    fprintf('  lambda = %.6f  (Schrodinger condition, Q_c = %.2f MeV)\n', lam, s.Q_c);
+
+    %% Step 3: Compute T_{1/2} for each Q_alpha using the SAME fixed V
+    % Only Q_a changes between iterations — the potential V is unchanged.
+    % This reproduces the [lower, centre, upper] range of Table 1.
     for iq = 1:3
         Q_a = s.Q_range(iq);
-
-        %% Step 1: Double-folding potentials
-        % VN0 = V_N(r)/lambda  (nuclear, M3Y)
-        % VC  = V_C(r)          (Coulomb, folded)
-        [VN0, VC] = double_folding(r, s.A_a, s.Z_a, s.A_c, s.Z_c, ...
-                                   rho0, c_f, a_f, Q_a, e2);
-
-        %% Step 2: Find lambda via WKB Wildermuth quantisation (eq. 18)
-        % int_0^{r1} k(r) dr = (G/2 + 3/4)*pi = 8.75*pi
-        lam = find_lambda(r, VN0, VC, Q_a, G_wild, s.L, hb2_2mu);
-
-        %% Step 3: Construct full effective potential
-        V = lam * VN0 + VC;
-        if s.L > 0
-            V = V + hb2_2mu * s.L*(s.L+1) ./ r.^2;
-        end
 
         %% Step 4: Half-life via TPA (eq. 7)
         T_s  = tpa_halflife(r, V, Q_a, s.Z_a, s.Z_c, ...
                             mu_c2, hb2_2mu, e2, hbar_c, hbar_MeVs, s.L);
         T_ns = T_s * 1e9;   % convert to nanoseconds
 
-        fprintf('  %-22s  %8.2f  %8.5f  %14.4e\n', s.label, Q_a, lam, T_ns);
+        fprintf('  %-22s  %8.2f  %8.6f  %14.4e\n', s.label, Q_a, lam, T_ns);
     end
 end
 
